@@ -7,7 +7,7 @@
 	Date Created:
 		06-20-2017
 	Date Last Modified:
-		06-27-2017
+		07-01-2017
 	Attach Script to:
 		
 	Notes:
@@ -20,10 +20,11 @@
 					Added Query methods: Count, Contains, Find, TryGetDeclared.
 						Renamed staticReference to declaredReference.
 					Added IComparable<T>, IEquatable<T>, and SmartEnum<T> and T comparison operators.
+		06-29-2017:	Added isDeclared.
+		06-30-2017:	Added GetNames.
+		07-01-2017:	Added index methods: GetInBounds, GetIndex, TryGetByIndex, GetByIndex.
 	To do:
 		* Option where runtime created instances with unique values can be added to the Enumerate collection (or, more likely, a separate mixed collection).
-		* Enum methods:
-			- [Complete]
 		* EnumUtility methods:
 			- static bool isValid — Determines if runtime declared values are valid
 	Bugs:
@@ -34,6 +35,9 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 using UnityEngine;
 
 namespace ChronoVault {
@@ -69,16 +73,24 @@ namespace ChronoVault {
 		private string _name;
 
 		/// <summary>
+		///		Does this entry match a statically declared field?
+		/// </summary>
+		public bool isDeclared {
+			get {
+				return !object.ReferenceEquals(declaredReference, null);
+			}
+		}
+
+		/// <summary>
 		///		Stores a reference to a matching statically declared field.  This is used to get property values on comparable types.
 		/// </summary>
 		protected SmartEnum<T> declaredReference {
 			get {
-				#if UNITY_EDITOR
-				if (!Application.isPlaying || (!staticReferenceChecked && object.ReferenceEquals(_declaredReference, null))) {
-				#else
-				if (!staticReferenceChecked && object.ReferenceEquals(_staticReference, null)) {
-				#endif
-					staticReferenceChecked = true;
+				if (!declaredReferenceChecked && object.ReferenceEquals(_declaredReference, null)) {
+					#if UNITY_EDITOR
+					//	Editor use should never cache
+					declaredReferenceChecked = true;
+					#endif
 
 					foreach (SmartEnum<T> val in GetListInternal(GetType())) {
 						if (val.Equals(this)) {
@@ -94,7 +106,7 @@ namespace ChronoVault {
 			}
 		}
 		private SmartEnum<T> _declaredReference;
-		private bool staticReferenceChecked;
+		private bool declaredReferenceChecked;
 
 
 
@@ -145,7 +157,7 @@ namespace ChronoVault {
 			bool reached = false;
 
 			//	Case where we match a static field
-			if (!object.ReferenceEquals(declaredReference, null)) {
+			if (isDeclared) {
 				foreach (U val in Enumerate<U>()) {
 					if (!reached) {
 						if (val.Equals(this))
@@ -193,7 +205,7 @@ namespace ChronoVault {
 			bool reached = false;
 
 			//	Case where we match a static field
-			if (!object.ReferenceEquals(declaredReference, null)) {
+			if (isDeclared) {
 				foreach (U val in Enumerate<U>().Reverse()) {
 					if (!reached) {
 						if (val.Equals(this))
@@ -239,6 +251,16 @@ namespace ChronoVault {
 		public U Prior<U>() where U : SmartEnum<T> {
 
 			return DecrementFrom<U>().FirstOrDefault();
+		}
+
+		/// <summary>
+		///		Retrieves an array of the names (ToString representation) of the statically declared fields in a specified enumeration.
+		/// </summary>
+		/// <typeparam name="U"></typeparam>
+		/// <returns></returns>
+		public static string[] GetNames<U>() where U : SmartEnum<T> {
+
+			return GetListInternal(typeof(U)).Select<SmartEnum<T>, string>(smEnum => smEnum.ToString()).ToArray();
 		}
 		#endregion
 
@@ -335,7 +357,7 @@ namespace ChronoVault {
 		/// <returns></returns>
 		public static bool TryGetDeclared<U>(U instance, out U declared) where U : SmartEnum<T> {
 
-			if (object.ReferenceEquals(instance, null) || object.ReferenceEquals(instance.declaredReference, null)) {
+			if (object.ReferenceEquals(instance, null) || !instance.isDeclared) {
 				declared = null;
 				return false;
 			}
@@ -345,7 +367,66 @@ namespace ChronoVault {
 		}
 		#endregion
 
-		#region Collection methods (Private)
+		#region Index methods (public)
+		/// <summary>
+		///		Determines if a provided index is in bounds of the statically declared types' count.
+		/// </summary>
+		/// <typeparam name="U"></typeparam>
+		/// <param name="index"></param>
+		/// <returns></returns>
+		public static bool GetInBounds<U>(int index) where U : SmartEnum<T> {
+
+			return index >= 0 && index < Count<U>();
+		}
+
+		/// <summary>
+		///		Gets the index that matches the instance.  If no statically declared value matches, returns -1.
+		/// </summary>
+		/// <typeparam name="U"></typeparam>
+		/// <param name="instance"></param>
+		/// <returns></returns>
+		public static int GetIndex<U>(U instance) where U : SmartEnum<T> {
+
+			U declared;
+			if (!TryGetDeclared<U>(instance, out declared))
+				return -1;
+			return GetListInternal(typeof(U)).IndexOf((SmartEnum<T>) declared);
+		}
+
+		/// <summary>
+		///		Attempts to return the statically declared value matching an index.
+		/// </summary>
+		/// <typeparam name="U"></typeparam>
+		/// <param name="index"></param>
+		/// <param name="instance"></param>
+		/// <returns></returns>
+		public static bool TryGetByIndex<U>(int index, out U instance) where U : SmartEnum<T> {
+
+			if (!GetInBounds<U>(index)) {
+				instance = default(U);
+				return false;
+			}
+
+			instance = GetByIndex<U>(index);
+			return true;
+		}
+
+		/// <summary>
+		///		Returns the statically declared value matching an index.
+		/// </summary>
+		/// <exception cref="ArgumentOutOfRangeException">Provided index is out of range.</exception>
+		/// <typeparam name="U"></typeparam>
+		/// <param name="index"></param>
+		/// <returns></returns>
+		public static U GetByIndex<U>(int index) where U : SmartEnum<T> {
+
+			if (!GetInBounds<U>(index))
+				throw new ArgumentOutOfRangeException("index", "Provided index \"" + index + "\" is out of range.");
+			return GetListInternal(typeof(U))[index] as U;
+		}
+		#endregion
+
+		#region Collection methods (private)
 		/// <summary>
 		///		Generates a collection for the specified Type in enumerateDictionary.
 		///		For internal use only—there are no Type or Dictionary exists checks.
