@@ -87,10 +87,9 @@ namespace ChronoVault {
 		protected SmartEnum<T> declaredReference {
 			get {
 				if (!declaredReferenceChecked && object.ReferenceEquals(_declaredReference, null)) {
-					#if UNITY_EDITOR
 					//	Editor use should never cache
-					declaredReferenceChecked = true;
-					#endif
+					if (Application.isPlaying)
+						declaredReferenceChecked = true;
 
 					foreach (SmartEnum<T> val in GetListInternal(GetType())) {
 						if (val.Equals(this)) {
